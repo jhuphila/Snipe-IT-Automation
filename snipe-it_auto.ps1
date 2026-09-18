@@ -358,6 +358,11 @@ if ($UseManufacturerFromWmi -and $WmiManufacturer -and $WmiManufacturer -ne "Unk
 $model = FindOrCreateModel -Name $ModelName -ModelNumber $ModelNumber -CategoryId ([int]$cat.id) -ManufacturerId $manuId
 Write-Host "Model: $($model.name) ($($model.model_number)) (ID $($model.id))" -ForegroundColor Green
 
+$response = Read-Host -Prompt "The following asset will be created/updated: $Hostname | $Serial | $ModelName | $ModelNumber | $WmiManufacturer. Continue? (y/n)"
+if ($response -ne "y") {
+  Write-Host "Aborted." -ForegroundColor Red
+  exit 1
+}
 $asset = CreateOrUpdateAsset -Name $Hostname -Serial $Serial -ModelId ([int]$model.id) -StatusId ([int]$status.id)
 
 Write-Host "Done. Asset ID: $($asset.id) | Name: $($asset.name) | Left unassigned (no auto-checkout)." -ForegroundColor Green
