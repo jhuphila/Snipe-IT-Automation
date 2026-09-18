@@ -228,11 +228,19 @@ function FindOrCreateModel {
   param(
     [string] $Name, [string] $ModelNumber, [int] $CategoryId, [int] $ManufacturerId = $null
   )
-  $resNum = Invoke-SnipeApi -Method GET -Endpoint ("models?limit=100&search={0}" -f [uri]::EscapeDataString($ModelNumber))
-  if ($resNum.total -gt 0) {
-    $hit = $resNum.rows | Where-Object { $_.model_number -eq $ModelNumber } | Select-Object -First 1
-    if ($hit) { return $hit }
+
+  # Try to search by model name first
+  $resName = Invoke-SnipeApi -Method GET -Endpoint ("models?limit=100&search={0}" -f [uri]::EscapeDataString($Name))
+  if ($resName.total -gt 0) {
+    $hit = $resName.rows | Where-Object { $_.name -eq $Name } | Select-Object -First 1
+    if ($hit) {
+      Write-Host "Found existing model by name: $($hit.name) (ID $($hit.id))" -ForegroundColor Green
+      return $hit
+    }
   }
+
+  # If no model is found by name, create a new one
+  Write-Host "No model found with name '$Name' - creating new model..." -ForegroundColor Magenta
   $body = @{ name=$Name; model_number=$ModelNumber; category_id=$CategoryId }
   if ($ManufacturerId) { $body.manufacturer_id = [int]$ManufacturerId }
   $created = $null
