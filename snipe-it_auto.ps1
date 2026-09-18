@@ -4,13 +4,13 @@
 # - API token is loaded from a local .env file (excluded from git, never deployed)
 # - No automatic checkout: asset is created/updated and left unassigned
 # - Robust status-label handling (find, update, fallback create)
-# - Category: Notebook / Desktop / Server (auto-detected)
+# - Category: Notebook / Desktop (auto-detected)
 # - Manufacturer via WMI (find-or-create)
 # - Custom fields: only sent if present in the model's fieldset
 # ================================
 
 # ==== CONFIG ====
-$SnipeUrl = "https://your-snipeit-instance.example.com"   # TODO: set for testing
+$SnipeUrl = "https://snipe-it.cci.drexel.edu"
 
 function Get-EnvValue {
     # Reads a single KEY=value line out of a local .env file.
@@ -32,11 +32,11 @@ function Get-EnvValue {
 
 $ApiToken = Get-EnvValue -Key "snipe-it_api_key"
 
-$CategoryNameNotebook = "Notebook"
-$CategoryNameDesktop  = "Desktop"
-$CategoryNameServer   = "Server"
-$DesiredDeployLabelName = "Active"              # preferred name (will try to use)
-$FallbackNewLabelName   = "Active (deployable)" # created if nothing suitable exists
+$CategoryNameNotebook = "Laptop"
+$CategoryNameDesktop  = "Desktop/Stationary/AIO"
+# $CategoryNameServer   = "Server"
+$DesiredDeployLabelName = "Loaner Equipment"              # preferred name (will try to use)
+$FallbackNewLabelName   = "Loaner Equipment" # created if nothing suitable exists
 
 $CompanyId  = $null
 $LocationId = $null
@@ -119,11 +119,13 @@ $ChassisTypes = if ($Enclosure.ChassisTypes) { $Enclosure.ChassisTypes } else { 
 $IsNotebook   = $false
 if ($ChassisTypes) { $IsNotebook = $ChassisTypes | Where-Object { $_ -in 8,9,10,14 } | ForEach-Object { $true } | Select-Object -First 1 }
 if (-not $ChassisTypes) { if (Get-CimInstance -Class Win32_Battery -ErrorAction SilentlyContinue) { $IsNotebook = $true } }
-$IsServerModel = $false
-if ($ModelNumber -match '(ProLiant|PowerEdge|ThinkSystem|PRIMERGY|ThinkServer)') { $IsServerModel = $true }
+# $IsServerModel = $false
+# if ($ModelNumber -match '(ProLiant|PowerEdge|ThinkSystem|PRIMERGY|ThinkServer)') { $IsServerModel = $true }
 
-$ModelName = if ($IsNotebook) { "Notebook" } elseif ($IsServerModel) { "Server" } else { "Desktop" }
-Write-Host "Detected -> Name: $Hostname | SN: $Serial | Type: $ModelName | Model number: $ModelNumber | Manufacturer: $WmiManufacturer | User: $Username" -ForegroundColor Green
+# Model name is the actual WMI model string (e.g. "Latitude 3400", "OptiPlex 7000 Micro"),
+# not a generic Notebook/Desktop bucket -- matches how models are named in this Snipe-IT instance.
+$ModelName = $ModelNumber
+Write-Host "Detected -> Name: $Hostname | SN: $Serial | Model number: $ModelNumber | Manufacturer: $WmiManufacturer | User: $Username" -ForegroundColor Green
 
 # ==== API helpers ====
 function FindOrCreateCategory {
@@ -332,7 +334,7 @@ if ($null -ne $status.status_type -and $status.status_type -ne "") {
 }
 Write-Host "Deployable status label: $($status.name) (ID $($status.id)) $statusInfo" -ForegroundColor Green
 
-$catName = if ($IsNotebook) { $CategoryNameNotebook } elseif ($IsServerModel) { $CategoryNameServer } else { $CategoryNameDesktop }
+$catName = if ($IsNotebook) { $CategoryNameNotebook } else { $CategoryNameDesktop }
 $cat = FindOrCreateCategory -Name $catName
 Write-Host "Category: $($cat.name) (ID $($cat.id))" -ForegroundColor Green
 
