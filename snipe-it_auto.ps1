@@ -43,8 +43,13 @@ $LocationId = $null
 $UseManufacturerFromWmi = $true
 
 # Known custom fields (only sent if present in the model's fieldset)
-$CF_DEVICE_NAME = "_snipeit_geratename_9"
-$CF_SERIAL_OPT  = "_snipeit_seriennummer_10"
+# Hardware spec custom fields
+$CF_RAM         = "_snipeit_ram_4"           
+$CF_CPU         = "_snipeit_cpu_5"           
+$CF_MEMORY_SSD  = "_snipeit_memory_ssd_6"    
+$CF_MEMORY_HDD  = "_snipeit_memory_hdd_7"   
+$CF_GPU         = "_snipeit_gpu_8"           
+$CF_UUID        = "_snipeit_uuid_9"          
 
 # ==== HTTP ====
 $Headers = @{
@@ -122,10 +127,46 @@ if (-not $ChassisTypes) { if (Get-CimInstance -Class Win32_Battery -ErrorAction 
 # $IsServerModel = $false
 # if ($ModelNumber -match '(ProLiant|PowerEdge|ThinkSystem|PRIMERGY|ThinkServer)') { $IsServerModel = $true }
 
+# Get RAM capacity and speed
+$RamModules = Get-CimInstance -Class Win32_PhysicalMemory -ErrorAction SilentlyContinue
+$RamCapacityGB = if ($RamModules) { [math]::Round(($RamModules | Measure-Object -Property Capacity -Sum).Sum / 1GB, 1) } else { $null }
+$RamSpeedMHz = if ($RamModules) { ($RamModules | Select-Object -First 1).Speed } else { $null }
+$Ram = if ($RamCapacityGB -and $RamSpeedMHz) { [string]"$RamCapacityGB GB $RamSpeedMHz MHz" } elseif ($RamCapacityGB) { [string]"$RamCapacityGB GB" } else { $null }
+$Cpu = (Get-CimInstance -Class Win32_Processor -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Name)
+$MemorySsd = Get-PhysicalDisk | Select-Object FriendlyName, MediaType, @{Name="Size(GB)";Expression={[math]::Round($_.Size/1GB,2)}}
+$MemorySsd = $MemorySsd | Where-Object { $_.MediaType -eq "SSD" } | Measure-Object -Property "Size(GB)" -Sum | ForEach-Object { [math]::Round($_.Sum, 2) }
+$MemoryHdd = Get-PhysicalDisk | Select-Object FriendlyName, MediaType, @{Name="Size(GB)";Expression={[math]::Round($_.Size/1GB,2)}}
+$MemoryHdd = $MemoryHdd | Where-Object { $_.MediaType -eq "HDD" } | Measure-Object -Property "Size(GB)" -Sum | ForEach-Object { [math]::Round($_.Sum, 2) }
+$Gpu = (Get-CimInstance -Class Win32_VideoController -ErrorAction SilentlyContinue).VideoProcessor | Where-Object { $_ -and $_.Trim() -ne "" }
+$Gpu = if ($Gpu) { ($Gpu -join ", ") } else { $null }
+$Uuid = (Get-CimInstance -Class Win32_ComputerSystemProduct -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty UUID)
+
 # Model name is the actual WMI model string (e.g. "Latitude 3400", "OptiPlex 7000 Micro"),
 # not a generic Notebook/Desktop bucket -- matches how models are named in this Snipe-IT instance.
 $ModelName = $ModelNumber
-Write-Host "Detected -> Name: $Hostname | SN: $Serial | Model number: $ModelNumber | Manufacturer: $WmiManufacturer | User: $Username" -ForegroundColor Green
+
+# Format hardware specs for display
+$RamDisplay = if ($Ram) { $Ram } else { "N/A" }
+$CpuDisplay = if ($Cpu) { $Cpu } else { "N/A" }
+$SsdDisplay = if ($MemorySsd) { "$MemorySsd GB" } else { "N/A" }
+$HddDisplay = if ($MemoryHdd) { "$MemoryHdd GB" } else { "N/A" }
+$GpuDisplay = if ($Gpu) { $Gpu } else { "N/A" }
+$UuidDisplay = if ($Uuid) { $Uuid } else { "N/A" }
+
+Write-Host "========== DETECTED SYSTEM INFO ==========" -ForegroundColor Cyan
+Write-Host "  Hostname:     $Hostname" -ForegroundColor Green
+Write-Host "  Serial:       $Serial" -ForegroundColor Green
+Write-Host "  Model:        $ModelNumber" -ForegroundColor Green
+Write-Host "  Manufacturer: $WmiManufacturer" -ForegroundColor Green
+Write-Host "  Type:         $(if ($IsNotebook) { 'Laptop' } else { 'Desktop' })" -ForegroundColor Green
+Write-Host "========== HARDWARE SPECS ==========" -ForegroundColor Cyan
+Write-Host "  RAM:          $RamDisplay" -ForegroundColor Green
+Write-Host "  CPU:          $CpuDisplay" -ForegroundColor Green
+Write-Host "  SSD:          $SsdDisplay" -ForegroundColor Green
+Write-Host "  HDD:          $HddDisplay" -ForegroundColor Green
+Write-Host "  GPU:          $GpuDisplay" -ForegroundColor Green
+Write-Host "  UUID:         $UuidDisplay" -ForegroundColor Green
+Write-Host "==========================================" -ForegroundColor Cyan
 
 # ==== API helpers ====
 function FindOrCreateCategory {
@@ -239,8 +280,23 @@ function FindOrCreateModel {
     }
   }
 
-  # If no model is found by name, create a new one
-  Write-Host "No model found with name '$Name' - creating new model..." -ForegroundColor Magenta
+  # If no model is found by name, prompt user before creating
+  Write-Host "========== MODEL NOT FOUND ==========" -ForegroundColor Yellow
+  Write-Host "No existing model found with name: $Name" -ForegroundColor Yellow
+  Write-Host "A new model will be created with:" -ForegroundColor Yellow
+  Write-Host "  Name:         $Name" -ForegroundColor Yellow
+  Write-Host "  Model Number: $ModelNumber" -ForegroundColor Yellow
+  Write-Host "  Category ID:  $CategoryId" -ForegroundColor Yellow
+  if ($ManufacturerId) { Write-Host "  Manufacturer ID: $ManufacturerId" -ForegroundColor Yellow }
+  Write-Host "=====================================" -ForegroundColor Yellow
+  
+  $modelResponse = Read-Host -Prompt "Create this new model? (y/n)"
+  if ($modelResponse -ne "y") {
+    Write-Host "Model creation aborted by user." -ForegroundColor Red
+    throw "Model creation cancelled. Cannot proceed without a valid model."
+  }
+
+  Write-Host "Creating new model..." -ForegroundColor Magenta
   $body = @{ name=$Name; model_number=$ModelNumber; category_id=$CategoryId }
   if ($ManufacturerId) { $body.manufacturer_id = [int]$ManufacturerId }
   $created = $null
@@ -272,12 +328,34 @@ function FindOrCreateModel {
 
 function GetModelFieldsetColumns {
   param([int] $ModelId)
-  # Fetches the fieldset columns (db_column) for this model
   $full = Invoke-SnipeApi -Method GET -Endpoint ("models/{0}" -f $ModelId)
-  $cols = @()
-  if ($full -and $full.fieldset -and $full.fieldset.fields) {
-    $cols = $full.fieldset.fields | ForEach-Object { $_.db_column } | Where-Object { $_ }
+
+  # Some Snipe-IT versions embed the fields directly on the model's fieldset object;
+  # most don't -- the model response usually only carries the fieldset's id/name.
+  if ($full -and $full.fieldset -and $full.fieldset.fields -and $full.fieldset.fields.rows) {
+    $cols = $full.fieldset.fields.rows | ForEach-Object { $_.db_column_name } | Where-Object { $_ }
+    if ($cols) {
+      Write-Host "Fieldset columns (embedded): $($cols -join ', ')" -ForegroundColor DarkGray
+      return $cols
+    }
   }
+
+  # Fallback: resolve the fieldset id and fetch it directly, where the field list actually lives.
+  $fieldsetId = $null
+  if ($full -and $full.fieldset -and $full.fieldset.id) { $fieldsetId = [int]$full.fieldset.id }
+  elseif ($full -and $full.fieldset_id) { $fieldsetId = [int]$full.fieldset_id }
+
+  if (-not $fieldsetId) {
+    Write-Host "Model $ModelId has no fieldset assigned -- no custom fields will be sent." -ForegroundColor DarkGray
+    return @()
+  }
+
+  $fs = Invoke-SnipeApi -Method GET -Endpoint ("fieldsets/{0}" -f $fieldsetId)
+  $cols = @()
+  if ($fs -and $fs.fields -and $fs.fields.rows) {
+    $cols = $fs.fields.rows | ForEach-Object { $_.db_column_name } | Where-Object { $_ }
+  }
+  Write-Host "Fieldset columns (via fieldsets/$fieldsetId): $($cols -join ', ')" -ForegroundColor DarkGray
   return $cols
 }
 
@@ -296,16 +374,28 @@ function CreateOrUpdateAsset {
   # No checkout: asset is created/updated and left unassigned.
   param([string] $Name, [string] $Serial, [int] $ModelId, [int] $StatusId)
 
-  # Only send custom fields that this model's fieldset actually has
+  # Only send custom fields that this model's fieldset actually has --
+  # AND only when we actually detected a value. Sending a null for a
+  # required field fails the same way as not sending it, just less
+  # predictably, so skip it and warn instead.
   $allowedCF = @(GetModelFieldsetColumns -ModelId $ModelId)
   $custom = @{}
-  if ($allowedCF -contains $CF_DEVICE_NAME) { $custom[$CF_DEVICE_NAME] = $Name }
-  if ($allowedCF -contains $CF_SERIAL_OPT)  { $custom[$CF_SERIAL_OPT]  = $Serial }
+  if ($allowedCF -contains $CF_RAM -and $Ram)               { $custom[$CF_RAM]        = [string]$Ram }
+  if ($allowedCF -contains $CF_CPU -and $Cpu)               { $custom[$CF_CPU]        = [string]$Cpu }
+  if ($allowedCF -contains $CF_MEMORY_SSD -and $MemorySsd)  { $custom[$CF_MEMORY_SSD] = [string]$MemorySsd }
+  if ($allowedCF -contains $CF_MEMORY_HDD -and $MemoryHdd)  { $custom[$CF_MEMORY_HDD] = [string]$MemoryHdd }
+  if ($allowedCF -contains $CF_GPU -and $Gpu)               { $custom[$CF_GPU]        = [string]$Gpu }
+  if ($allowedCF -contains $CF_UUID -and $Uuid)             { $custom[$CF_UUID]       = [string]$Uuid }
+
+  $skipped = $allowedCF | Where-Object { $_ -notin $custom.Keys }
+  if ($skipped) {
+    Write-Warning "Fieldset has these columns but no value was detected for them (not sent -- may fail if marked Required): $($skipped -join ', ')"
+  }
 
   $existing = GetAssetBySerial -Serial $Serial
   if ($existing) {
     Write-Host "Asset with SN '$Serial' already exists (ID $($existing.id)) -- updating..." -ForegroundColor Green
-    $updBody = @{ name=$Name; model_id=[int]$ModelId; status_id=[int]$StatusId } + $custom
+    $updBody = @{ model_id=[int]$ModelId; status_id=[int]$StatusId } + $custom
     if ($CompanyId)  { $updBody.company_id  = [int]$CompanyId }
     if ($LocationId) { $updBody.location_id = [int]$LocationId }
     $ru = Invoke-SnipeApi -Method PATCH -Endpoint ("hardware/{0}" -f $existing.id) -Body $updBody
@@ -358,7 +448,8 @@ if ($UseManufacturerFromWmi -and $WmiManufacturer -and $WmiManufacturer -ne "Unk
 $model = FindOrCreateModel -Name $ModelName -ModelNumber $ModelNumber -CategoryId ([int]$cat.id) -ManufacturerId $manuId
 Write-Host "Model: $($model.name) ($($model.model_number)) (ID $($model.id))" -ForegroundColor Green
 
-$response = Read-Host -Prompt "The following asset will be created/updated: $Hostname | $Serial | $ModelName | $ModelNumber | $WmiManufacturer. Continue? (y/n)"
+Write-Host "The following asset will be created/updated: $Hostname | $Serial | $ModelName | $ModelNumber | $WmiManufacturer" -ForegroundColor Yellow
+$response = Read-Host -Prompt "Continue? (y/n) ENSURE THE CORRECT MODEL IS SELECTED BEFORE CONTINUING!"
 if ($response -ne "y") {
   Write-Host "Aborted." -ForegroundColor Red
   exit 1
