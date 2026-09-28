@@ -445,6 +445,7 @@ if ($UseManufacturerFromWmi -and $WmiManufacturer -and $WmiManufacturer -ne "Unk
   }
 }
 
+# Model name follows the format: "Manufacturer Model Number." Example: "Latitude 3400"
 $model = FindOrCreateModel -Name $ModelName -ModelNumber $ModelNumber -CategoryId ([int]$cat.id) -ManufacturerId $manuId
 Write-Host "Model: $($model.name) ($($model.model_number)) (ID $($model.id))" -ForegroundColor Green
 
