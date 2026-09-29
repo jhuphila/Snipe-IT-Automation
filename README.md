@@ -35,5 +35,4 @@ The script will:
 
 - **Testing version** — API token loaded from local `.env` file (not for USB deployment)
 - Assets are left **unassigned** (no automatic checkout)
-- Chassis detection determines Laptop vs Desktop category
 - Manufacturer names are normalized (e.g., "Hewlett-Packard" → "HP")
