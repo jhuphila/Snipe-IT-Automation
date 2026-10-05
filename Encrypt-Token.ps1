@@ -1,14 +1,8 @@
 # Encrypt-Token.ps1
-# Run once to generate snipeit-token.enc from the API token + passphrase
+# Encrypts the API token and outputs a Base64 string to embed in snipe-it_auto.ps1
 # Usage: .\Encrypt-Token.ps1
 
-param(
-    [string]$OutputPath = ".\snipeit-token.enc"
-)
-
-Add-Type -AssemblyName System.Security
-
-function Encrypt-StringWithPassphrase {
+function Encrypt-TokenToBase64 {
     param(
         [Parameter(Mandatory)][string]$PlainText,
         [Parameter(Mandatory)][SecureString]$Passphrase
@@ -46,13 +40,14 @@ function Encrypt-StringWithPassphrase {
     
     $Aes.Dispose()
     
-    # Return salt + encrypted data (salt needed for decryption)
-    return $Salt + $EncryptedBytes
+    # Combine salt + ciphertext and convert to Base64
+    $Combined = $Salt + $EncryptedBytes
+    return [Convert]::ToBase64String($Combined)
 }
 
-# Prompt for inputs
+# === Main ===
 Write-Host "=== Snipe-IT Token Encryption ===" -ForegroundColor Cyan
-Write-Host "This will create an encrypted token file for USB deployment." -ForegroundColor Gray
+Write-Host "This will output an encrypted Base64 string to embed in snipe-it_auto.ps1" -ForegroundColor Gray
 Write-Host ""
 
 $Token = Read-Host -Prompt "Enter the Snipe-IT API token" -AsSecureString
@@ -86,15 +81,25 @@ if ($P1.Length -lt 8) {
 $P1 = $null; $P2 = $null
 [GC]::Collect()
 
-# Encrypt and save
-$EncryptedData = Encrypt-StringWithPassphrase -PlainText $TokenPlain -Passphrase $Passphrase
-[IO.File]::WriteAllBytes($OutputPath, $EncryptedData)
+# Encrypt and output
+$Base64String = Encrypt-TokenToBase64 -PlainText $TokenPlain -Passphrase $Passphrase
 
 # Clear sensitive data
 $TokenPlain = $null
 [GC]::Collect()
 
 Write-Host ""
-Write-Host "Encrypted token saved to: $OutputPath" -ForegroundColor Green
-Write-Host "Copy this file to the deployment USB." -ForegroundColor Yellow
+Write-Host "========== COPY THE STRING BELOW ==========" -ForegroundColor Green
+Write-Host $Base64String -ForegroundColor White
+Write-Host "===========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "Paste this into snipe-it_auto.ps1 as the value of `$EncryptedTokenBase64" -ForegroundColor Yellow
 Write-Host "DO NOT write down the passphrase - share it verbally with technicians." -ForegroundColor Red
+
+# Also copy to clipboard if possible
+try {
+    $Base64String | Set-Clipboard
+    Write-Host "(Also copied to clipboard)" -ForegroundColor DarkGray
+} catch {
+    # Clipboard not available, ignore
+}
