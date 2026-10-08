@@ -406,8 +406,6 @@ function GetModelFieldsetColumns {
   param([int] $ModelId)
   $full = Invoke-SnipeApi -Method GET -Endpoint ("models/{0}" -f $ModelId)
 
-  # Some Snipe-IT versions embed the fields directly on the model's fieldset object;
-  # most don't -- the model response usually only carries the fieldset's id/name.
   if ($full -and $full.fieldset -and $full.fieldset.fields -and $full.fieldset.fields.rows) {
     $cols = $full.fieldset.fields.rows | ForEach-Object { $_.db_column_name } | Where-Object { $_ }
     if ($cols) {
