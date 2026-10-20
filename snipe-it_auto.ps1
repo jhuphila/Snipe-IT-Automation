@@ -464,6 +464,17 @@ function CreateOrUpdateAsset {
   # required field fails the same way as not sending it, just less
   # predictably, so skip it and warn instead.
   $allowedCF = @(GetModelFieldsetColumns -ModelId $ModelId)
+
+  $expectedCF = @{
+    RAM  = $CF_RAM
+    CPU  = $CF_CPU
+    SSD  = $CF_MEMORY_SSD
+    HDD  = $CF_MEMORY_HDD
+    GPU  = $CF_GPU
+    UUID = $CF_UUID
+  }
+  $script:MissingCFNames = @($expectedCF.Keys | Where-Object { $expectedCF[$_] -notin $allowedCF } | Sort-Object)
+
   $custom = @{}
   if ($allowedCF -contains $CF_RAM -and $Ram)               { $custom[$CF_RAM]        = [string]$Ram }
   if ($allowedCF -contains $CF_CPU -and $Cpu)               { $custom[$CF_CPU]        = [string]$Cpu }
@@ -565,3 +576,8 @@ $asset = CreateOrUpdateAsset -Name $Hostname -Serial $Serial -ModelId ([int]$mod
 
 Write-Host "Done. Asset ID: $($asset.id) | Name: $($asset.name) | Left unassigned (no auto-checkout)." -ForegroundColor Green
 Write-Host "Direct link: $SnipeUrl/hardware/$($asset.id)"
+if ($script:MissingCFNames) {
+  $bold = "$([char]27)[1m"
+  $reset = "$([char]27)[0m"
+  Write-Host "${bold}ERROR: This model's fieldset is missing hardware spec fields: $($script:MissingCFNames -join ', '). Those specs will not be saved in Snipe-IT.${reset}" -ForegroundColor White -BackgroundColor Magenta
+}
