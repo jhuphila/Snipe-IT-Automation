@@ -2,6 +2,8 @@
 # Encrypts the API token and outputs a Base64 string to embed in snipe-it_auto.ps1
 # Usage: .\Encrypt-Token.ps1
 
+$ErrorActionPreference = 'Stop'
+
 function Encrypt-TokenToBase64 {
     param(
         [Parameter(Mandatory)][string]$PlainText,
@@ -15,17 +17,22 @@ function Encrypt-TokenToBase64 {
     
     # Generate random salt (16 bytes)
     $Salt = New-Object byte[] 16
-    [Security.Cryptography.RandomNumberGenerator]::Fill($Salt)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($Salt)
+    }
+    finally {
+        $rng.Dispose()
+    }
+    if (-not ($Salt | Where-Object { $_ -ne 0 })) {
+        throw "Salt generation failed (all bytes are zero)."
+    }
     
     # Derive key using PBKDF2 (RFC 2898)
     $KeyDerivation = New-Object Security.Cryptography.Rfc2898DeriveBytes(
-        $PassphraseText, $Salt, 100000, [Security.Cryptography.HashAlgorithmName]::SHA256)
+        $PassphraseText, $Salt, 600000, [Security.Cryptography.HashAlgorithmName]::SHA256)
     $Key = $KeyDerivation.GetBytes(32)  # AES-256
     $IV = $KeyDerivation.GetBytes(16)
-    
-    # Clear passphrase from memory
-    $PassphraseText = $null
-    [GC]::Collect()
     
     # Encrypt with AES-256-CBC
     $Aes = [Security.Cryptography.Aes]::Create()
@@ -41,8 +48,35 @@ function Encrypt-TokenToBase64 {
     $Aes.Dispose()
     
     # Combine salt + ciphertext and convert to Base64
-    $Combined = $Salt + $EncryptedBytes
-    return [Convert]::ToBase64String($Combined)
+    $Combined = [byte[]]($Salt + $EncryptedBytes)
+    $Base64 = [Convert]::ToBase64String($Combined)
+    
+    # Round-trip check: decrypt the output the same way snipe-it_auto.ps1 does
+    $Check = [Convert]::FromBase64String($Base64)
+    $CheckSalt = [byte[]]$Check[0..15]
+    $CheckCipher = [byte[]]$Check[16..($Check.Length - 1)]
+    $CheckDerivation = New-Object Security.Cryptography.Rfc2898DeriveBytes(
+        $PassphraseText, $CheckSalt, 600000, [Security.Cryptography.HashAlgorithmName]::SHA256)
+    $CheckAes = [Security.Cryptography.Aes]::Create()
+    try {
+        $CheckAes.Key = $CheckDerivation.GetBytes(32)
+        $CheckAes.IV = $CheckDerivation.GetBytes(16)
+        $CheckAes.Mode = [Security.Cryptography.CipherMode]::CBC
+        $CheckAes.Padding = [Security.Cryptography.PaddingMode]::PKCS7
+        $CheckBytes = $CheckAes.CreateDecryptor().TransformFinalBlock($CheckCipher, 0, $CheckCipher.Length)
+    }
+    finally {
+        $CheckAes.Dispose()
+    }
+    if ([Text.Encoding]::UTF8.GetString($CheckBytes) -cne $PlainText) {
+        throw "Round-trip verification failed: encrypted output does not decrypt to the original token."
+    }
+    
+    # Clear passphrase from memory
+    $PassphraseText = $null
+    [GC]::Collect()
+    
+    return $Base64
 }
 
 # === Main ===
