@@ -14,9 +14,9 @@ PowerShell script to automatically register Windows assets into Snipe-IT for **D
 
 - PowerShell 5.1+
 - Network access to `https://snipe-it.cci.drexel.edu`
-- A `.env` file in the script directory containing your API token:
+- An encrypted API Key in `snipe-it_auto.ps1`
   ```
-  snipe-it_api_key=YOUR_API_TOKEN_HERE
+  $EncryptedTokenBase64: TOKEN_HERE
   ```
 
 ## Usage
